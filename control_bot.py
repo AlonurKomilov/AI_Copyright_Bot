@@ -1,333 +1,267 @@
 import asyncio
+import logging
 from aiogram import Bot, Dispatcher, F
-from config import Config
-from aiogram.types import *
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-import database 
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from logging import Logger
+from config import config
+import database
 import subprocess
-from pathlib import Path
-import shutil
+import openai
+import httpx
 
-logger = Logger("bot")
-bot = Bot(Config.BOT_TOKEN)
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("bot")
+
+bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
 
+def admin_only(handler):
+    async def wrapper(message: Message, *args, **kwargs):
+        if message.from_user.id not in config.ADMIN_IDS:
+            await message.answer("🚫 Access denied.")
+            return
+        return await handler(message, *args, **kwargs)
+    return wrapper
+
+# States
+class StateGroups:
+    class AddSource(StatesGroup): username = State()
+    class RemoveSource(StatesGroup): username = State()
+    class SetTarget(StatesGroup): username = State()
+    class AddSpamKeyword(StatesGroup): keyword = State()
+    class RemoveSpamKeyword(StatesGroup): keyword = State()
+    class AddSpamType(StatesGroup): type = State()
+    class RemoveSpamType(StatesGroup): type = State()
+    class SetAiModel(StatesGroup): model = State()
+    class AiPrompt(StatesGroup): text = State()
+
+# Core commands
 @dp.message(F.text == "/start")
+@admin_only
 async def start_command(message: Message):
-    await message.answer("*Hi👋*", parse_mode="Markdown", reply_markup=main_menu())
+    await message.answer("👋 Welcome to AI Bot Control Panel", reply_markup=main_menu())
 
 @dp.message(F.text == "◀️ Cancel")
+@admin_only
 async def cancel_handler(message: Message, state: FSMContext):
-    if state:
-        await state.clear()
-    
-    await message.answer("Cancelled.", reply_markup=main_menu())
+    await state.clear()
+    await message.answer("❌ Cancelled", reply_markup=main_menu())
 
-@dp.message(F.text == "ℹ️ Bot info")
-async def get_info(message: Message):
+@dp.message(F.text == "ℹ️ Bot Info")
+@admin_only
+async def bot_info(message: Message):
     try:
-        msg = ""
-        source_chats = database.get_all_sources()
-        msg += f"🎊 Source chats: {", ".join(source_chats)}\n"
-        
-        target_chat = database.get_target_chat()
-        msg += f"🎯 Target chat: {str(target_chat) if target_chat is not None else "not setted!"}\n"
-
-        spam_keywords = database.get_all_spam_keywords()
-        msg += f"⭕️ Spam keywords: {", ".join(spam_keywords)}\n"
-
-        spam_types = database.get_all_spam_types()
-        msg += f"⭕️ Spam types: {", ".join(spam_types)}\n"
-
-        ai_info = database.get_ai_status()
-        msg += f"🤖 AI model: {ai_info['model']}\n"
-        msg += f"🟢 AI Enabled\n" if bool(ai_info['enabled']) else "🔴 AI Disabled\n"
-        
-        await message.answer(msg)
+        ai = database.get_ai_status()
+        msg = [
+            f"📡 Sources: {', '.join(database.get_all_sources())}",
+            f"🎯 Target: {database.get_target_chat() or 'Not set'}",
+            f"🧾 Keywords: {', '.join(database.get_all_spam_keywords())}",
+            f"🧱 Types: {', '.join(database.get_all_spam_types())}",
+            f"🤖 Model: {ai['model']}",
+            "🟢 AI is ON" if ai['enabled'] else "🔴 AI is OFF"
+        ]
+        await message.answer("\n".join(msg))
     except Exception as e:
-        await message.answer("Something went wrong, please try again later.")
+        logger.exception("Bot info error")
+        await message.answer("❌ Failed to load bot info.")
 
-class AddSource(StatesGroup):
-    username = State()
-
-@dp.message(F.text == "➕ Add source")
+# === Source Management ===
+@dp.message(F.text == "➕ Add Source")
+@admin_only
 async def add_source(message: Message, state: FSMContext):
-    try:
-        await state.set_state(AddSource.username)
-        await message.answer("Enter username: ", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in add_source: {e}")
+    await state.set_state(StateGroups.AddSource.username)
+    await message.answer("Enter @source username:", reply_markup=cancel_keyboard())
 
-@dp.message(AddSource.username)
+@dp.message(StateGroups.AddSource.username)
+@admin_only
 async def save_source(message: Message, state: FSMContext):
-    try:
-        username = message.text.strip()
-        if not username.startswith("@"):
-            await message.answer("Incorrect input!\nExample: @username_source", reply_markup=cancel_keyboard())
-            return
+    database.add_source(message.text.strip())
+    await state.clear()
+    await message.answer("✅ Source added", reply_markup=main_menu())
 
-        await state.clear()
-        database.add_source(username)
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_source: {e}")
-
-class RemoveSource(StatesGroup):
-    username = State()
-
-@dp.message(F.text == "❌ Del source")
+@dp.message(F.text == "❌ Remove Source")
+@admin_only
 async def del_source(message: Message, state: FSMContext):
-    try:
-        await state.set_state(RemoveSource.username)
-        await message.answer("Enter username: ", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in add_source: {e}")
+    await state.set_state(StateGroups.RemoveSource.username)
+    await message.answer("Enter @source to remove:", reply_markup=cancel_keyboard())
 
-@dp.message(RemoveSource.username)
-async def save_del_source(message: Message, state: FSMContext):
-    try:
-        username = message.text.strip()
-        if not username.startswith("@"):
-            await message.answer("Incorrect input!\nExample: @username_source", reply_markup=cancel_keyboard())
-            return
+@dp.message(StateGroups.RemoveSource.username)
+@admin_only
+async def confirm_del_source(message: Message, state: FSMContext):
+    database.del_source(message.text.strip())
+    await state.clear()
+    await message.answer("✅ Source removed", reply_markup=main_menu())
 
-        await state.clear()
-        database.del_source(username)
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in del: {e}")
+# === Target ===
+@dp.message(F.text == "🎯 Set Target")
+@admin_only
+async def set_target(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.SetTarget.username)
+    await message.answer("Enter @target chat:", reply_markup=cancel_keyboard())
 
-class TargetChat(StatesGroup):
-    username = State()
+@dp.message(StateGroups.SetTarget.username)
+@admin_only
+async def save_target(message: Message, state: FSMContext):
+    database.set_target_chat(message.text.strip())
+    await state.clear()
+    await message.answer("✅ Target set", reply_markup=main_menu())
 
-@dp.message(F.text == "🎯 Set target chat")
-async def set_target_chat(message: Message, state: FSMContext):
-    try:
-        await state.set_state(TargetChat.username)
-        await message.answer("Enter the target chat username (e.g., @targetchannel):", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in set_target_chat: {e}")
+# === Spam Keyword ===
+@dp.message(F.text == "➕ Add Keyword")
+@admin_only
+async def add_keyword(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.AddSpamKeyword.keyword)
+    await message.answer("Enter spam keyword:", reply_markup=cancel_keyboard())
 
-@dp.message(TargetChat.username)
-async def save_target_chat(message: Message, state: FSMContext):
-    try:
-        username = message.text.strip()
-        if not username.startswith("@"):
-            await message.answer("Incorrect input!\nExample: @targetchannel", reply_markup=cancel_keyboard())
-            return
+@dp.message(StateGroups.AddSpamKeyword.keyword)
+@admin_only
+async def save_keyword(message: Message, state: FSMContext):
+    database.add_spam_keyword(message.text.strip())
+    await state.clear()
+    await message.answer("✅ Keyword added", reply_markup=main_menu())
 
-        database.set_target_chat(username)
+@dp.message(F.text == "❌ Remove Keyword")
+@admin_only
+async def remove_keyword(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.RemoveSpamKeyword.keyword)
+    await message.answer("Enter keyword to remove:", reply_markup=cancel_keyboard())
 
-        await state.clear()
-        await message.answer("🎯 Target chat set successfully!", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_target_chat: {e}")
+@dp.message(StateGroups.RemoveSpamKeyword.keyword)
+@admin_only
+async def confirm_remove_keyword(message: Message, state: FSMContext):
+    database.del_spam_keyword(message.text.strip())
+    await state.clear()
+    await message.answer("✅ Keyword removed", reply_markup=main_menu())
 
+# === Spam Types ===
+@dp.message(F.text == "➕ Add Type")
+@admin_only
+async def add_type(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.AddSpamType.type)
+    await message.answer("Enter type (text/photo/video...):", reply_markup=cancel_keyboard())
 
-class AddSpamKeyword(StatesGroup):
-    keyword = State()
+@dp.message(StateGroups.AddSpamType.type)
+@admin_only
+async def save_type(message: Message, state: FSMContext):
+    database.add_spam_type(message.text.strip().lower())
+    await state.clear()
+    await message.answer("✅ Type added", reply_markup=main_menu())
 
-@dp.message(F.text == "➕ Add spam keyword")
-async def add_spam_keyword(message: Message, state: FSMContext):
-    try:
-        await state.set_state(AddSpamKeyword.keyword)
-        await message.answer("Enter : ", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in add_source: {e}")
+@dp.message(F.text == "❌ Remove Type")
+@admin_only
+async def remove_type(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.RemoveSpamType.type)
+    await message.answer("Enter type to remove:", reply_markup=cancel_keyboard())
 
-@dp.message(AddSpamKeyword.keyword)
-async def save_spam_keyword(message: Message, state: FSMContext):
-    try:
-        keyword = message.text.strip()
-        await state.clear()
-        database.add_spam_keyword(keyword)
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_source: {e}")
+@dp.message(StateGroups.RemoveSpamType.type)
+@admin_only
+async def confirm_remove_type(message: Message, state: FSMContext):
+    database.del_spam_type(message.text.strip().lower())
+    await state.clear()
+    await message.answer("✅ Type removed", reply_markup=main_menu())
 
-class RemoveSpamKeyword(StatesGroup):
-    keyword = State()
-
-@dp.message(F.text == "❌ Del spam keyword")
-async def del_spam_keyword(message: Message, state: FSMContext):
-    try:
-        await state.set_state(RemoveSpamKeyword.keyword)
-        await message.answer("Enter : ", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in del_spam_keyword: {e}")
-
-@dp.message(RemoveSpamKeyword.keyword)
-async def save_spam_keywords(message: Message, state: FSMContext):
-    try:
-        keyword = message.text.strip()
-
-        await state.clear()
-        database.del_spam_keyword(keyword)
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_spam_keywords: {e}")
-
-class AddSpamType(StatesGroup):
-    type = State()
-
-@dp.message(F.text == "➕ Add  spam type")
-async def add_spam_type(message: Message, state: FSMContext):
-    try:
-        await state.set_state(AddSpamType.type)
-        await message.answer("Enter type: ", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in add_spam_type: {e}")
-
-@dp.message(AddSpamType.type)
-async def save_spam_type(message: Message, state: FSMContext):
-    try:
-        type = message.text.strip().lower()
-        types = ['text', 'file', 'photo', 'video', 'location', 'contact']
-
-        if type not in types:
-            await message.answer(f"Please enter correct media types: \n{", ".join(types)}\n")
-            return
-        
-        database.add_spam_type(type)
-        await state.clear()
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_spam_type: {e}")
-
-class DelSpamType(StatesGroup):
-    type = State()
-
-@dp.message(F.text == "❌ Del spam type")
-async def add_spam_type(message: Message, state: FSMContext):
-    try:
-        await state.set_state(DelSpamType.type)
-        await message.answer("Enter type: ", reply_markup=cancel_keyboard())
-    except Exception as e:
-        logger.error(f"Error in add_spam_type: {e}")
-
-@dp.message(DelSpamType.type)
-async def save_spam_type(message: Message, state: FSMContext):
-    try:
-        type = message.text.strip().lower()
-        types = ['text', 'file', 'photo', 'video', 'location', 'contact']
-
-        if type not in types:
-            await message.answer(f"Please enter correct media types: \n{", ".join(types)}\n")
-            return
-        
-        database.del_spam_type(type)
-        await state.clear()
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_spam_type: {e}")
-
+# === AI ===
 @dp.message(F.text == "🟢 Enable AI")
+@admin_only
 async def enable_ai(message: Message):
-    try:
-        database.enable_ai()
-        await message.answer("✅")
-    except Exception as e:
-        logger.error(f"Error in enable_ai: {e}")
+    database.enable_ai()
+    await message.answer("✅ AI Enabled")
 
 @dp.message(F.text == "🔴 Disable AI")
-async def enable_ai(message: Message):
+@admin_only
+async def disable_ai(message: Message):
+    database.disable_ai()
+    await message.answer("✅ AI Disabled")
+
+@dp.message(F.text == "🤖 Set Model")
+@admin_only
+async def set_model(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.SetAiModel.model)
+    models = list(config.AI_MODELS.keys())
+    await message.answer("Choose model:\n" + "\n".join(models), reply_markup=cancel_keyboard())
+
+@dp.message(StateGroups.SetAiModel.model)
+@admin_only
+async def save_model(message: Message, state: FSMContext):
+    model = message.text.strip()
+    if model in config.AI_MODELS:
+        database.set_ai_model(config.AI_MODELS[model])
+        await message.answer("✅ Model set", reply_markup=main_menu())
+    else:
+        await message.answer("❌ Unknown model")
+    await state.clear()
+
+# === Prompt + Balance ===
+@dp.message(F.text == "💬 Prompt")
+@admin_only
+async def prompt_start(message: Message, state: FSMContext):
+    await state.set_state(StateGroups.AiPrompt.text)
+    await message.answer("Send your prompt:", reply_markup=cancel_keyboard())
+
+@dp.message(StateGroups.AiPrompt.text)
+@admin_only
+async def run_prompt(message: Message, state: FSMContext):
+    await state.clear()
     try:
-        database.disable_ai()
-        await message.answer("✅")
-    except Exception as e:
-        logger.error(f"Error in enable_ai: {e}")
+        openai.api_key = config.OPENAI_API_KEY
+        model = database.get_ai_status()['model']
+        r = openai.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": "You are a helpful assistant."},
+                      {"role": "user", "content": message.text.strip()}]
+        )
+        await message.answer(r.choices[0].message.content)
+    except Exception:
+        logger.exception("Prompt failed")
+        await message.answer("❌ Prompt failed")
 
-class SetAiModel(StatesGroup):
-    model = State()
-
-@dp.message(F.text == "🤖 Set AI model")
-async def set_ai_model(message: Message, state: FSMContext):
+@dp.message(F.text == "💰 Balance")
+@admin_only
+async def check_balance(message: Message):
     try:
-        models = ['GPT-4.1', 'o4-mini', 'o3']
-        await message.answer(f"Models: \n{",\n".join(models)}\n")
-        await state.set_state(SetAiModel.model)
-        await message.answer("Enter model: ", reply_markup=cancel_keyboard())
-
-    except Exception as e:
-        logger.error(f"Error in set_ai_model: {e}")
-
-@dp.message(SetAiModel.model)
-async def save_ai_model(message: Message, state: FSMContext):
-    try:
-        model = message.text.strip()
-        models = ['GPT-4.1', 'o4-mini', 'o3']
-
-        if model not in models:
-            await message.answer("Wrong model, please try again!")
-            return
-        
-        database.set_ai_model(model)
-        await message.answer("✅", reply_markup=main_menu())
-    except Exception as e:
-        logger.error(f"Error in save_id")
-
+        headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}"}
+        async with httpx.AsyncClient() as client:
+            r = await client.get("https://api.openai.com/dashboard/billing/credit_grants", headers=headers)
+            data = r.json()
+            await message.answer(f"💰 Balance:\nTotal: ${data['total_granted']:.2f}\nUsed: ${data['total_used']:.2f}\nLeft: ${data['total_available']:.2f}")
+    except Exception:
+        logger.exception("Balance failed")
+        await message.answer("❌ Failed to get balance")
 
 @dp.message(F.text == "📄 Save changes")
+@admin_only
 async def save_changes(message: Message):
     try:
-        SERVICE_NAME = "ai_userbot.service"
-        subprocess.run(["sudo", "systemctl", "restart", SERVICE_NAME], check = True)
-        await message.answer("Done!")
-    except Exception as e:
-        logger.error(e)
-        await message.answer("Error!")
+        subprocess.run(["sudo", "systemctl", "restart", "ai_userbot.service"], check=True)
+        await message.answer("🔄 Service restarted")
+    except Exception:
+        logger.exception("Restart failed")
+        await message.answer("❌ Failed to restart service")
 
 # Keyboards
 def main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [
-                KeyboardButton(text="ℹ️ Bot info")
-            ],
-            [
-                KeyboardButton(text="🎯 Set target chat")
-            ],
-            [
-                KeyboardButton(text="➕ Add source"), 
-                KeyboardButton(text="❌ Del source")
-            ],
-            [
-                KeyboardButton(text="➕ Add spam keyword"),
-                KeyboardButton(text="❌ Del spam keyword")
-            ],
-            [
-                KeyboardButton(text="➕ Add  spam type"),
-                KeyboardButton(text="❌ Del spam type")
-            ],
-            [
-                KeyboardButton(text="🟢 Enable AI"),
-                KeyboardButton(text="🔴 Disable AI")
-            ],
-            [
-                KeyboardButton(text="🤖 Set AI model")
-            ],
-            [
-                KeyboardButton(text="📄 Save changes")
-            ]
+            [KeyboardButton(text="ℹ️ Bot Info"), KeyboardButton(text="🎯 Set Target")],
+            [KeyboardButton(text="➕ Add Source"), KeyboardButton(text="❌ Remove Source")],
+            [KeyboardButton(text="➕ Add Keyword"), KeyboardButton(text="❌ Remove Keyword")],
+            [KeyboardButton(text="➕ Add Type"), KeyboardButton(text="❌ Remove Type")],
+            [KeyboardButton(text="🟢 Enable AI"), KeyboardButton(text="🔴 Disable AI")],
+            [KeyboardButton(text="🤖 Set Model"), KeyboardButton(text="💬 Prompt")],
+            [KeyboardButton(text="💰 Balance"), KeyboardButton(text="📄 Save changes")]
         ],
         resize_keyboard=True
     )
 
 def cancel_keyboard():
     return ReplyKeyboardMarkup(
-        resize_keyboard=True,
-        keyboard=[
-            [
-                KeyboardButton(text="◀️ Cancel")
-            ]
-        ]
+        keyboard=[[KeyboardButton(text="◀️ Cancel")]], resize_keyboard=True
     )
 
 async def main():
-    print("Starting....")
+    print("🚀 Bot starting...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
