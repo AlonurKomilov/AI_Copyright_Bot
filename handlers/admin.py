@@ -5,8 +5,10 @@ from config import config
 import database
 from keyboards import main_menu, cancel_keyboard
 from handlers.state_groups import StateGroups
+from models.pro_users import load_pro_users
 
 admin_router = Router()
+pro_users = load_pro_users()
 
 def admin_only(handler):
     async def wrapper(message: Message, *args, **kwargs):
@@ -45,6 +47,35 @@ async def bot_info(message: Message):
         await message.answer("\n".join(msg))
     except Exception as e:
         await message.answer("❌ Failed to load bot info.")
+
+# === Manage PRO user ===
+@admin_router.message(F.text.startswith("/manage_pro"))
+@admin_only
+async def manage_pro_user(message: Message):
+    parts = message.text.strip().split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Usage: /manage_pro TELEGRAM_ID")
+        return
+
+    target_id = parts[1]
+    user = pro_users.get(target_id)
+
+    if not user:
+        await message.answer("❌ No PRO user found with this ID.")
+        return
+
+    text = (
+        f"👤 User ID: {target_id}\n"
+        f"📅 Expires: {user.expires_at}\n"
+        f"📡 Target: {user.target_channel or '—'}\n"
+        f"📥 Sources: {', '.join(user.source_channels) or '—'}\n"
+        f"🔤 Filters: {', '.join(user.filters) or '—'}\n"
+        f"📁 Media Types: {', '.join(user.media_types) or '—'}\n"
+        f"🤖 AI: {user.ai_model} ({'🟢 Enabled' if user.ai_enabled else '🔴 Disabled'})\n"
+        f"{'🟢 Active' if user.active else '🔴 Inactive'}"
+    )
+
+    await message.answer(text)
 
 # === Sources ===
 @admin_router.message(F.text == "➕ Add Source")
