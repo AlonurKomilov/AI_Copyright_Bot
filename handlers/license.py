@@ -46,6 +46,28 @@ async def auto_revoke_expired_pros():
         await asyncio.sleep(86400)  # Run once every 24 hours
 
 
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+
+@license_router.message(commands=["admin_menu"])
+async def show_admin_menu(message: Message):
+    if message.from_user.id not in config.ADMIN_IDS:
+        await message.answer("🚫 Access denied.")
+        return
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="/generate_license 30"), KeyboardButton(text="/generate_license 365")],
+            [KeyboardButton(text="/stats_pro"), KeyboardButton(text="/list_pro")],
+            [KeyboardButton(text="/export_pro"), KeyboardButton(text="/import_pro")],
+            [KeyboardButton(text="/renew_pro <id> <days>")],
+            [KeyboardButton(text="/revoke_pro <id>")],
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("📋 Admin Control Panel:", reply_markup=keyboard)
+
+
 # Save helpers
 def save_licenses():
     LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
