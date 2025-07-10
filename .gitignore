@@ -1,0 +1,40 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# IDE/editor config
+.idea/
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Env configuration
+.env
+*.env
+
+# Database and user data
+*.db
+*.sqlite3
+*.session
+data/
+userbot.db
+*.csv
+
+# Log files
+*.log
+
+# Zip archives
+*.zip
+
+# Pyrogram session
+*.session
+*.session-journal
+
+# Your own bot-specific extras (add if needed)
