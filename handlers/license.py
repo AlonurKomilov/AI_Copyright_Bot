@@ -30,7 +30,31 @@ else:
     pro_users = {}
 
 # Background auto-revoke expired PROs
-async def auto_revoke_expired_pros():
+import asyncio
+# Notify expiring and expired PROs
+
+async def notify_expiring_pro_users(bot):
+    today = datetime.utcnow().date()
+    for user_id, expiry_str in pro_users.items():
+        try:
+            expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+            if (expiry - today).days == 1:
+                await bot.send_message(user_id, "🔔 Your PRO access expires tomorrow! Renew now to avoid interruption.")
+        except:
+            continue
+
+async def notify_expired_pro_users(bot):
+    today = datetime.utcnow().date()
+    for user_id, expiry_str in pro_users.items():
+        try:
+            expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+            if expiry == today:
+                await bot.send_message(user_id, "⛔️ Your PRO has expired. Reactivate to continue using all features: /buy_pro or /activate_license")
+        except:
+            continue
+
+
+# Save helpers
     while True:
         try:
             today = datetime.utcnow().date()
