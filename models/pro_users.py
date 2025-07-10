@@ -1,4 +1,4 @@
-# models/pro_users.py
+# models/pro_users.py (updated with AI fields)
 
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -18,6 +18,8 @@ class ProUser:
         self.filters: List[str] = []
         self.media_types: List[str] = []
         self.active: bool = True
+        self.ai_enabled: bool = True
+        self.ai_model: str = "GPT-3.5 Turbo"
 
     def to_dict(self):
         return {
@@ -27,6 +29,8 @@ class ProUser:
             "filters": self.filters,
             "media_types": self.media_types,
             "active": self.active,
+            "ai_enabled": self.ai_enabled,
+            "ai_model": self.ai_model,
         }
 
     @staticmethod
@@ -37,6 +41,8 @@ class ProUser:
         user.filters = data.get("filters", [])
         user.media_types = data.get("media_types", [])
         user.active = data.get("active", True)
+        user.ai_enabled = data.get("ai_enabled", True)
+        user.ai_model = data.get("ai_model", "GPT-3.5 Turbo")
         return user
 
 
