@@ -13,6 +13,7 @@ from handlers.license import (
     notify_expiring_pro_users,
     notify_expired_pro_users
 )
+from handlers.pro_settings import pro_router  # ✅ New router
 
 # Set up logging
 logging.basicConfig(
@@ -30,6 +31,7 @@ def register_routers(dispatcher: Dispatcher):
     dispatcher.include_router(admin_router)
     dispatcher.include_router(ai_router)
     dispatcher.include_router(license_router)
+    dispatcher.include_router(pro_router)  # ✅ Connect new PRO router
 
 async def main():
     print("🚀 Bot is starting...")
