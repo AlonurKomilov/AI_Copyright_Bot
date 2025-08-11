@@ -9,6 +9,8 @@ import database
 import subprocess
 import openai
 import httpx
+import os
+import sys
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -230,15 +232,17 @@ async def check_balance(message: Message):
         logger.exception("Balance failed")
         await message.answer("❌ Failed to get balance")
 
-@dp.message(F.text == "📄 Save changes")
+@dp.message(F.text == "🔄 Restart Bot")
 @admin_only
-async def save_changes(message: Message):
+async def restart_bot(message: Message):
+    """Gracefully restarts the bot."""
     try:
-        subprocess.run(["sudo", "systemctl", "restart", "ai_userbot.service"], check=True)
-        await message.answer("🔄 Service restarted")
-    except Exception:
-        logger.exception("Restart failed")
-        await message.answer("❌ Failed to restart service")
+        await message.answer("🤖 Restarting bot...")
+        # This replaces the current process with a new one
+        os.execv(sys.executable, ['python'] + sys.argv)
+    except Exception as e:
+        logger.exception("Failed to restart bot")
+        await message.answer(f"❌ Failed to restart bot: {e}")
 
 # Keyboards
 def main_menu():
@@ -250,7 +254,7 @@ def main_menu():
             [KeyboardButton(text="➕ Add Type"), KeyboardButton(text="❌ Remove Type")],
             [KeyboardButton(text="🟢 Enable AI"), KeyboardButton(text="🔴 Disable AI")],
             [KeyboardButton(text="🤖 Set Model"), KeyboardButton(text="💬 Prompt")],
-            [KeyboardButton(text="💰 Balance"), KeyboardButton(text="📄 Save changes")]
+            [KeyboardButton(text="💰 Balance"), KeyboardButton(text="🔄 Restart Bot")]
         ],
         resize_keyboard=True
     )
