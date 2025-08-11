@@ -113,3 +113,49 @@ def get_ai_status():
         'model': result[0],
         'enabled': bool(result[1])
     } if result else None
+
+# === User Usage Tracking ===
+from datetime import date
+
+def check_and_update_user(user_id: int) -> int:
+    """
+    Checks a user's request count. If the last request was on a previous day,
+    resets the count. Creates the user if they don't exist.
+    Returns the current request count for today.
+    """
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    today = date.today().isoformat()
+
+    # Try to get the user
+    cursor.execute("SELECT requests_count, last_request_date FROM users WHERE user_id = ?", (user_id,))
+    user_data = cursor.fetchone()
+
+    if user_data:
+        requests_count, last_request_date = user_data
+        if last_request_date != today:
+            # It's a new day, reset the count
+            requests_count = 0
+            cursor.execute(
+                "UPDATE users SET requests_count = 0, last_request_date = ? WHERE user_id = ?",
+                (today, user_id)
+            )
+    else:
+        # User does not exist, create them
+        requests_count = 0
+        cursor.execute(
+            "INSERT INTO users (user_id, requests_count, last_request_date) VALUES (?, ?, ?)",
+            (user_id, 0, today)
+        )
+
+    conn.commit()
+    conn.close()
+    return requests_count
+
+def increment_request_count(user_id: int):
+    """Increments the request count for a user."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET requests_count = requests_count + 1 WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()

@@ -1,29 +1,24 @@
 from aiogram.fsm.state import StatesGroup, State
 
-class StateGroups:
-    class AddSource(StatesGroup):
-        username = State()
+# States for the Admin Control Panel
+class AdminStates(StatesGroup):
+    add_source = State()
+    remove_source = State()
+    set_target = State()
+    add_spam_keyword = State()
+    remove_spam_keyword = State()
+    add_spam_type = State()
+    remove_spam_type = State()
+    set_ai_model = State()
 
-    class RemoveSource(StatesGroup):
-        username = State()
+# States for the PRO user settings
+class ProStates(StatesGroup):
+    set_target = State()
+    add_source = State()
+    set_filters = State()
+    set_media_types = State()
+    set_ai_model = State()
 
-    class SetTarget(StatesGroup):
-        username = State()
-
-    class AddSpamKeyword(StatesGroup):
-        keyword = State()
-
-    class RemoveSpamKeyword(StatesGroup):
-        keyword = State()
-
-    class AddSpamType(StatesGroup):
-        type = State()
-
-    class RemoveSpamType(StatesGroup):
-        type = State()
-
-    class SetAiModel(StatesGroup):
-        model = State()
-
-    class AiPrompt(StatesGroup):
-        text = State()
+# State for managing conversation history
+class Conversation(StatesGroup):
+    active = State()

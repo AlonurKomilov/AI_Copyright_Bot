@@ -59,5 +59,7 @@ def load_pro_users() -> Dict[str, ProUser]:
 
 # Save all PRO users
 def save_pro_users(users: Dict[str, ProUser]):
+    # Ensure the parent directory exists
+    PRO_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(PRO_USERS_FILE, "w") as f:
         json.dump({uid: user.to_dict() for uid, user in users.items()}, f, indent=2)
