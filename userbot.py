@@ -4,6 +4,8 @@ import re
 import database
 import openai
 from config import config
+import base64
+import io
 
 def reload_config():
     global SOURCE_CHANNELS, TARGET_CHANNEL, SPAM_KEYWORDS, SPAM_TYPES, AI_SETTINGS
@@ -43,7 +45,7 @@ async def forward_message(client, message):
 
     for kw in SPAM_KEYWORDS:
         if str(kw).lower() in text.lower():
-            return  
+            return
 
     # 2️⃣ Check spammed types (skip if it matches a blocked type)
     spammed_types = SPAM_TYPES
@@ -53,11 +55,21 @@ async def forward_message(client, message):
        ("video" in spammed_types and message.video) or \
        ("location" in spammed_types and message.location) or \
        ("contact" in spammed_types and message.contact):
-        return 
+        return
 
-    if bool(AI_SETTINGS['enabled']):
-        text = await paraphrase(text, AI_SETTINGS['model'])
+    # AI Processing Logic
+    if message.photo and not message.caption and bool(AI_SETTINGS['enabled']):
+        # If it's a photo without a caption and AI is on, generate a new one.
+        generated_caption = await generate_caption_for_image(message)
+        if generated_caption:
+            text = generated_caption
+    elif bool(AI_SETTINGS['enabled']) and text:
+        # For all other message types with text, paraphrase it.
+        paraphrased_content = await paraphrase(text, AI_SETTINGS['model'])
+        if paraphrased_content:
+            text = paraphrased_content
 
+    # Forwarding Logic
     if message.photo:
         await client.send_photo(TARGET_CHANNEL, message.photo.file_id, caption=text)
     elif message.text:
@@ -78,6 +90,41 @@ async def forward_message(client, message):
         await client.send_location(TARGET_CHANNEL, latitude=message.location.latitude, longitude=message.location.longitude)
     else:
         await message.forward(TARGET_CHANNEL)
+
+
+async def generate_caption_for_image(message):
+    try:
+        # Download image to an in-memory buffer
+        image_buffer = io.BytesIO()
+        await message.download(in_memory=True, file_name=image_buffer)
+        image_buffer.seek(0)
+
+        # Encode image to Base64
+        base64_image = base64.b64encode(image_buffer.read()).decode('utf-8')
+
+        prompt_text = "Bu rasmda nima tasvirlanganini qisqa va tushunarli qilib, bir nechta gap bilan tavsiflab ber."
+
+        response = openai.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    ]
+                }
+            ],
+            max_tokens=300
+        )
+        caption = response.choices[0].message.content
+        return f"{caption}\n\n@abclegacynews"
+    except Exception as e:
+        print(f"Error generating caption for image: {e}")
+        return None
 
 
 async def paraphrase(text, model: str):
