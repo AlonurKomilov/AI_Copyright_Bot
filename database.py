@@ -159,3 +159,51 @@ def increment_request_count(user_id: int):
     cursor.execute("UPDATE users SET requests_count = requests_count + 1 WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+# === Post Queue Management ===
+import datetime
+
+def add_to_queue(source_message_id: int, source_chat_id: int, content_type: str, scheduled_for: datetime.datetime, file_id: str = None, caption: str = None):
+    """Adds a new post to the sending queue."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    conn.execute(
+        """
+        INSERT INTO post_queue (source_message_id, source_chat_id, content_type, file_id, caption, scheduled_for)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (source_message_id, source_chat_id, content_type, file_id, caption, scheduled_for)
+    )
+    conn.commit()
+    conn.close()
+
+def get_due_posts():
+    """Gets all posts from the queue that are due to be sent."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    now = datetime.datetime.now()
+    cursor.execute(
+        "SELECT id, content_type, file_id, caption FROM post_queue WHERE scheduled_for <= ?",
+        (now,)
+    )
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+def remove_from_queue(post_id: int):
+    """Removes a post from the queue after it has been sent."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    conn.execute("DELETE FROM post_queue WHERE id = ?", (post_id,))
+    conn.commit()
+    conn.close()
+
+def get_last_scheduled_time():
+    """Gets the timestamp of the last scheduled post in the queue."""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT MAX(scheduled_for) FROM post_queue")
+    result = cursor.fetchone()
+    conn.close()
+    if result and result[0]:
+        # SQLite returns timestamp as string, so we need to parse it
+        return datetime.datetime.fromisoformat(result[0])
+    return None

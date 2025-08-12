@@ -29,9 +29,14 @@ def register_routers(dispatcher: Dispatcher):
     dispatcher.include_router(license_router)
     dispatcher.include_router(pro_router)
 
+from scheduler import run_scheduler
+
 async def main():
     print("🚀 Bot is starting...")
     register_routers(dp)
+
+    # Start the scheduler as a background task
+    asyncio.create_task(run_scheduler())
 
     await dp.start_polling(bot)
 

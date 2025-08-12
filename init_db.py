@@ -66,5 +66,18 @@ CREATE TABLE IF NOT EXISTS licenses (
 )
 """)
 
+# Create post_queue table for scheduled posts
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS post_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_message_id INTEGER,
+    source_chat_id INTEGER,
+    content_type TEXT NOT NULL,
+    file_id TEXT,
+    caption TEXT,
+    scheduled_for TIMESTAMP NOT NULL
+)
+""")
+
 conn.commit()
 conn.close()
