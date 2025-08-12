@@ -1,5 +1,5 @@
 import logging
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from config import config
@@ -9,7 +9,6 @@ from handlers.state_groups import Conversation # Import Conversation state
 import openai
 import httpx
 import subprocess
-from main import bot
 from models.pro_users import load_pro_users
 
 ai_router = Router()
@@ -59,7 +58,7 @@ async def disable_ai(message: Message):
 
 # === Handle any text message as a prompt ===
 @ai_router.message(F.text)
-async def handle_text_message(message: Message, state: FSMContext):
+async def handle_text_message(message: Message, state: FSMContext, bot: Bot):
     """Handle all text messages for AI conversation."""
     user_id = message.from_user.id
     ai_status = database.get_ai_status()

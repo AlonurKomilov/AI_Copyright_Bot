@@ -1,79 +1,52 @@
-# handlers/license.py (updated with /stats_pro)
-
-from aiogram import Router
-from aiogram.types import Message, FSInputFile
-import json
-from pathlib import Path
-from config import config
+import sqlite3
 import secrets
 from datetime import datetime, timedelta
 import csv
+from pathlib import Path
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message, FSInputFile, ReplyKeyboardMarkup, KeyboardButton
+from config import config
+from models.pro_users import ProUser, save_pro_user, load_pro_user, load_pro_users
 
 license_router = Router()
-
-LICENSE_FILE = Path("data/licenses.json")
-ACTIVE_USERS_FILE = Path("data/pro_users.json")
 EXPORT_FILE = Path("data/pro_users_export.csv")
 
-# Load license keys
-if LICENSE_FILE.exists():
-    with open(LICENSE_FILE, "r") as f:
-        license_keys = json.load(f)
-else:
-    license_keys = {}
+def get_db_connection():
+    return sqlite3.connect(config.DATABASE_NAME)
 
-# Load active PRO users
-if ACTIVE_USERS_FILE.exists():
-    with open(ACTIVE_USERS_FILE, "r") as f:
-        pro_users = json.load(f)
-else:
-    pro_users = {}
+# License DB functions
+def add_license(license_key: str, duration_days: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO licenses (license_key, duration_days) VALUES (?, ?)", (license_key, duration_days))
+    conn.commit()
+    conn.close()
 
-# Background auto-revoke expired PROs
-import asyncio
-# Notify expiring and expired PROs
+def get_license(license_key: str) -> tuple | None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT duration_days FROM licenses WHERE license_key = ?", (license_key,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
 
-async def notify_expiring_pro_users(bot):
-    today = datetime.utcnow().date()
-    for user_id, expiry_str in pro_users.items():
-        try:
-            expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-            if (expiry - today).days == 1:
-                await bot.send_message(user_id, "🔔 Your PRO access expires tomorrow! Renew now to avoid interruption.")
-        except:
-            continue
+def delete_license(license_key: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM licenses WHERE license_key = ?", (license_key,))
+    conn.commit()
+    conn.close()
 
-async def notify_expired_pro_users(bot):
-    today = datetime.utcnow().date()
-    for user_id, expiry_str in pro_users.items():
-        try:
-            expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-            if expiry == today:
-                await bot.send_message(user_id, "⛔️ Your PRO has expired. Reactivate to continue using all features: /buy_pro or /activate_license")
-        except:
-            continue
+# Pro User DB functions
+def delete_pro_user(user_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pro_users WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
 
-
-# Save helpers
-    while True:
-        try:
-            today = datetime.utcnow().date()
-            expired_ids = [user_id for user_id, expiry in pro_users.items()
-                           if datetime.strptime(expiry, "%Y-%m-%d").date() < today]
-            for uid in expired_ids:
-                del pro_users[uid]
-            if expired_ids:
-                print(f"🧹 Auto-revoked expired PROs: {expired_ids}")
-                save_pro_users()
-        except Exception as e:
-            print("Auto-revoke error:", e)
-        await asyncio.sleep(86400)  # Run once every 24 hours
-
-
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-
-
-@license_router.message(commands=["admin_menu"])
+@license_router.message(Command("admin_menu"))
 async def show_admin_menu(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
@@ -87,55 +60,27 @@ async def show_admin_menu(message: Message):
             [KeyboardButton(text="/renew_pro <id> <days>")],
             [KeyboardButton(text="/revoke_pro <id>")],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
     )
     await message.answer("📋 Admin Control Panel:", reply_markup=keyboard)
 
-
-# Save helpers
-def save_licenses():
-    LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(LICENSE_FILE, "w") as f:
-        json.dump(license_keys, f)
-
-def save_pro_users():
-    with open(ACTIVE_USERS_FILE, "w") as f:
-        json.dump(pro_users, f)
-
-@license_router.message(commands=["stats_pro"])
-async def stats_pro(message: Message):
+@license_router.message(Command("generate_license"))
+async def generate_license_key(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
         return
 
-    today = datetime.utcnow().date()
-    total = len(pro_users)
-    active = 0
-    expired = 0
-    expiring_soon = 0
+    parts = message.text.strip().split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Usage: /generate_license <days>")
+        return
 
-    for expiry_str in pro_users.values():
-        try:
-            expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-            if expiry >= today:
-                active += 1
-                if (expiry - today).days <= 7:
-                    expiring_soon += 1
-            else:
-                expired += 1
-        except:
-            continue
+    days = int(parts[1])
+    new_key = secrets.token_hex(4).upper()
+    add_license(new_key, days)
+    await message.answer(f"🆕 License key generated: `{new_key}`\nValid for {days} days", parse_mode="Markdown")
 
-    msg = (
-        f"📊 PRO Subscription Stats:\n"
-        f"• Total PRO users: {total}\n"
-        f"• ✅ Active: {active}\n"
-        f"• ⏳ Expiring in ≤7 days: {expiring_soon}\n"
-        f"• ❌ Expired: {expired}"
-    )
-    await message.answer(msg)
-
-@license_router.message(commands=["activate_license"])
+@license_router.message(Command("activate_license"))
 async def activate_license(message: Message):
     parts = message.text.strip().split()
     if len(parts) != 2:
@@ -143,66 +88,41 @@ async def activate_license(message: Message):
         return
 
     license_key = parts[1]
-    telegram_id = str(message.from_user.id)
+    user_id = message.from_user.id
 
-    if telegram_id in pro_users:
+    pro_user = load_pro_user(user_id)
+    if pro_user and pro_user.active:
         await message.answer("✅ You already have PRO access.")
         return
 
-    if license_key not in license_keys:
+    license_data = get_license(license_key)
+    if not license_data:
         await message.answer("❌ Invalid or expired license key.")
         return
 
-    days = license_keys[license_key]
-    expiry_date = (datetime.utcnow().date() + timedelta(days=days - 1)).strftime("%Y-%m-%d")
-    pro_users[telegram_id] = expiry_date
-    del license_keys[license_key]
-    save_licenses()
-    save_pro_users()
+    days = license_data[0]
+    expiry_date = (datetime.utcnow().date() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+    new_pro_user = ProUser(telegram_id=user_id, expires_at=expiry_date)
+    save_pro_user(new_pro_user)
+    delete_license(license_key)
 
     await message.answer(f"✅ License activated. PRO access valid until {expiry_date}.")
 
-
-@license_router.message(commands=["is_pro"])
+@license_router.message(Command("is_pro"))
 async def check_pro_status(message: Message):
-    telegram_id = str(message.from_user.id)
+    user_id = message.from_user.id
+    pro_user = load_pro_user(user_id)
     today = datetime.utcnow().date()
 
-    if telegram_id in pro_users:
-        expiry = datetime.strptime(pro_users[telegram_id], "%Y-%m-%d").date()
-        if expiry >= today:
-            await message.answer(f"✅ You are a PRO user until {expiry}.")
-            return
-        else:
-            del pro_users[telegram_id]
-            save_pro_users()
-
-    if message.from_user.id in config.ADMIN_IDS:
+    if pro_user and datetime.strptime(pro_user.expires_at, "%Y-%m-%d").date() >= today:
+        await message.answer(f"✅ You are a PRO user until {pro_user.expires_at}.")
+    elif user_id in config.ADMIN_IDS:
         await message.answer("✅ You are an ADMIN (PRO by default).")
     else:
         await message.answer("🔒 You are not a PRO user.")
 
-
-@license_router.message(commands=["generate_license"])
-async def generate_license_key(message: Message):
-    if message.from_user.id not in config.ADMIN_IDS:
-        await message.answer("🚫 Access denied.")
-        return
-
-    parts = message.text.strip().split()
-    if len(parts) != 2 or parts[1] not in ["30", "365"]:
-        await message.answer("❌ Usage: /generate_license [30|365]  (days of validity)")
-        return
-
-    days = int(parts[1])
-    new_key = secrets.token_hex(4).upper()
-    license_keys[new_key] = days
-    save_licenses()
-    await message.answer(f"🆕 License key generated: `{new_key}`
-Valid for {days} days", parse_mode="Markdown")
-
-
-@license_router.message(commands=["revoke_pro"])
+@license_router.message(Command("revoke_pro"))
 async def revoke_pro_user(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
@@ -213,54 +133,83 @@ async def revoke_pro_user(message: Message):
         await message.answer("❌ Usage: /revoke_pro TELEGRAM_ID")
         return
 
-    target_id = parts[1]
-    if target_id in pro_users:
-        del pro_users[target_id]
-        save_pro_users()
+    target_id = int(parts[1])
+    pro_user = load_pro_user(target_id)
+    if pro_user:
+        delete_pro_user(target_id)
         await message.answer(f"🗑️ PRO access revoked for user ID: {target_id}")
     else:
         await message.answer("ℹ️ This user is not a PRO user.")
 
-
-@license_router.message(commands=["list_pro"])
+@license_router.message(Command("list_pro"))
 async def list_pro_users(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
         return
 
-    today = datetime.utcnow().date()
+    pro_users = load_pro_users()
     if not pro_users:
         await message.answer("ℹ️ No active PRO users found.")
         return
 
+    today = datetime.utcnow().date()
     result_lines = ["🧑‍💻 Active PRO Users:"]
-    for user_id, expiry_str in pro_users.items():
-        expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-        status = "✅ active" if expiry >= today else "❌ expired"
-        result_lines.append(f"👤 {user_id} — until {expiry_str} ({status})")
+    for user in pro_users.values():
+        expiry_date = datetime.strptime(user.expires_at, "%Y-%m-%d").date()
+        status = "✅ active" if expiry_date >= today else "❌ expired"
+        result_lines.append(f"👤 {user.telegram_id} — until {user.expires_at} ({status})")
 
-    await message.answer("
-".join(result_lines))
+    await message.answer("\n".join(result_lines))
 
+@license_router.message(Command("stats_pro"))
+async def stats_pro(message: Message):
+    if message.from_user.id not in config.ADMIN_IDS:
+        await message.answer("🚫 Access denied.")
+        return
 
-@license_router.message(commands=["export_pro"])
+    pro_users = load_pro_users()
+    today = datetime.utcnow().date()
+    total = len(pro_users)
+    active = 0
+    expired = 0
+    expiring_soon = 0
+
+    for user in pro_users.values():
+        expiry_date = datetime.strptime(user.expires_at, "%Y-%m-%d").date()
+        if expiry_date >= today:
+            active += 1
+            if (expiry_date - today).days <= 7:
+                expiring_soon += 1
+        else:
+            expired += 1
+
+    msg = (
+        f"📊 PRO Subscription Stats:\n"
+        f"• Total PRO users: {total}\n"
+        f"• ✅ Active: {active}\n"
+        f"• ⏳ Expiring in ≤7 days: {expiring_soon}\n"
+        f"• ❌ Expired: {expired}"
+    )
+    await message.answer(msg)
+
+@license_router.message(Command("export_pro"))
 async def export_pro_users(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
         return
 
+    pro_users = load_pro_users()
     EXPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(EXPORT_FILE, mode="w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(["Telegram ID", "Expiry Date"])
-        for user_id, expiry_str in pro_users.items():
-            writer.writerow([user_id, expiry_str])
+        for user in pro_users.values():
+            writer.writerow([user.telegram_id, user.expires_at])
 
     file = FSInputFile(EXPORT_FILE)
     await message.answer_document(file, caption="📤 Exported PRO user list")
 
-
-@license_router.message(commands=["renew_pro"])
+@license_router.message(Command("renew_pro"))
 async def renew_pro_user(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
@@ -271,25 +220,23 @@ async def renew_pro_user(message: Message):
         await message.answer("❌ Usage: /renew_pro TELEGRAM_ID DAYS")
         return
 
-    target_id = parts[1]
-    days = int(parts[2])
+    target_id = int(parts[1])
+    days_to_add = int(parts[2])
     today = datetime.utcnow().date()
 
-    if target_id in pro_users:
-        try:
-            current_expiry = datetime.strptime(pro_users[target_id], "%Y-%m-%d").date()
-            new_expiry = max(today, current_expiry) + timedelta(days=days)
-        except:
-            new_expiry = today + timedelta(days=days)
+    pro_user = load_pro_user(target_id)
+    if pro_user:
+        current_expiry = datetime.strptime(pro_user.expires_at, "%Y-%m-%d").date()
+        new_expiry = max(today, current_expiry) + timedelta(days=days_to_add)
+        pro_user.expires_at = new_expiry.strftime("%Y-%m-%d")
     else:
-        new_expiry = today + timedelta(days=days)
+        new_expiry = today + timedelta(days=days_to_add)
+        pro_user = ProUser(telegram_id=target_id, expires_at=new_expiry.strftime("%Y-%m-%d"))
 
-    pro_users[target_id] = new_expiry.strftime("%Y-%m-%d")
-    save_pro_users()
-    await message.answer(f"🔁 PRO renewed for user {target_id} until {new_expiry}.")
+    save_pro_user(pro_user)
+    await message.answer(f"🔁 PRO renewed for user {target_id} until {pro_user.expires_at}.")
 
-
-@license_router.message(commands=["import_pro"])
+@license_router.message(Command("import_pro"))
 async def import_pro_users(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("🚫 Access denied.")
@@ -307,21 +254,23 @@ async def import_pro_users(message: Message):
         lines = content.read().decode("utf-8").splitlines()
         reader = csv.DictReader(lines)
 
-        imported = 0
+        imported_count = 0
         for row in reader:
-            telegram_id = str(row.get("Telegram ID", "").strip())
+            telegram_id_str = row.get("Telegram ID", "").strip()
             expiry_str = row.get("Expiry Date", "").strip()
-            if telegram_id and expiry_str:
+            if telegram_id_str.isdigit() and expiry_str:
                 try:
+                    user_id = int(telegram_id_str)
                     datetime.strptime(expiry_str, "%Y-%m-%d")
-                    pro_users[telegram_id] = expiry_str
-                    imported += 1
-                except ValueError:
+                    pro_user = load_pro_user(user_id) or ProUser(telegram_id=user_id, expires_at=expiry_str)
+                    pro_user.expires_at = expiry_str
+                    save_pro_user(pro_user)
+                    imported_count += 1
+                except (ValueError, TypeError):
                     continue
 
-        save_pro_users()
-        await message.answer(f"✅ Imported {imported} PRO users from file.")
+        await message.answer(f"✅ Imported {imported_count} PRO users from file.")
 
     except Exception as e:
-        await message.answer("❌ Failed to import file.")
+        await message.answer(f"❌ Failed to import file: {e}")
         print("Import error:", e)
