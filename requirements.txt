@@ -1,0 +1,6 @@
+aiogram
+pyrogram
+openai
+python-dotenv
+TgCrypto
+apscheduler
