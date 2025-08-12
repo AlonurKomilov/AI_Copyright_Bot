@@ -1,0 +1,32 @@
+services:
+  control-bot:
+    build: .
+    command: ["python", "main.py"]
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - ./userbot.db:/app/userbot.db
+    restart: always
+
+  userbot:
+    build: .
+    command: ["python", "userbot.py"]
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - ./userbot.db:/app/userbot.db
+      - ./userbot.session:/app/userbot.session
+    restart: always
+
+  scheduler:
+    build: .
+    command: ["python", "scheduler.py"]
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - ./userbot.db:/app/userbot.db
+      - ./userbot.session:/app/userbot.session
+    restart: always
