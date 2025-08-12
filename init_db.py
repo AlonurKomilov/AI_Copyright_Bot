@@ -25,7 +25,15 @@ cursor.execute("""
 
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS spam_types (
-        type TEXT PRIMARY KEY  -- 'photo', 'video', etc.
+        type_name TEXT PRIMARY KEY  -- 'photo', 'video', etc.
+    )
+""")
+
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        requests_count INTEGER DEFAULT 0,
+        last_request_date TEXT
     )
 """)
 

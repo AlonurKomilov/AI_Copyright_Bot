@@ -25,20 +25,20 @@ def get_all_spam_keywords():
 
 def add_spam_type(spam_type: str):
     conn = sqlite3.connect(DATABASE_NAME)
-    conn.execute("INSERT OR REPLACE INTO spam_types VALUES (?)", (spam_type,));
+    conn.execute("INSERT OR REPLACE INTO spam_types (type_name) VALUES (?)", (spam_type,));
     conn.commit()
     conn.close()
 
 def del_spam_type(spam_type: str):
     conn = sqlite3.connect(DATABASE_NAME)
-    conn.execute("DELETE FROM spam_types WHERE type = ?", (spam_type,))
+    conn.execute("DELETE FROM spam_types WHERE type_name = ?", (spam_type,))
     conn.commit()
     conn.close()
 
 def get_all_spam_types():
     conn = sqlite3.connect(DATABASE_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT type FROM spam_types")
+    cursor.execute("SELECT type_name FROM spam_types")
     spam_types = [row[0] for row in cursor.fetchall()]
     conn.close()
     return spam_types

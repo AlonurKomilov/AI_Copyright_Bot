@@ -4,3 +4,10 @@ openai
 python-dotenv
 TgCrypto
 apscheduler
+beautifulsoup4
+requests
+stripe
+fastapi
+pydantic
+httpx
+uvicorn
