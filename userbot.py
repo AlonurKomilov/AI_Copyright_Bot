@@ -6,6 +6,7 @@ import openai
 from config import config
 import base64
 import io
+import datetime
 
 def reload_config():
     global SOURCE_CHANNELS, TARGET_CHANNEL, SPAM_KEYWORDS, SPAM_TYPES, AI_SETTINGS
@@ -69,27 +70,54 @@ async def forward_message(client, message):
         if paraphrased_content:
             text = paraphrased_content
 
-    # Forwarding Logic
+    # Queueing Logic
+    content_type = None
+    file_id = None
+    caption = text
+
     if message.photo:
-        await client.send_photo(TARGET_CHANNEL, message.photo.file_id, caption=text)
-    elif message.text:
-        await client.send_message(TARGET_CHANNEL, text)
+        content_type = 'photo'
+        file_id = message.photo.file_id
     elif message.video:
-        await client.send_video(TARGET_CHANNEL, message.video.file_id, caption=text)
+        content_type = 'video'
+        file_id = message.video.file_id
     elif message.document:
-        await client.send_document(TARGET_CHANNEL, message.document.file_id, caption=text)
+        content_type = 'document'
+        file_id = message.document.file_id
     elif message.audio:
-        await client.send_audio(TARGET_CHANNEL, message.audio.file_id, caption=text)
+        content_type = 'audio'
+        file_id = message.audio.file_id
     elif message.voice:
-        await client.send_voice(TARGET_CHANNEL, message.voice.file_id, caption=text)
+        content_type = 'voice'
+        file_id = message.voice.file_id
     elif message.sticker:
-        await client.send_sticker(TARGET_CHANNEL, message.sticker.file_id)
-    elif message.contact:
-        await client.send_contact(TARGET_CHANNEL, phone_number=message.contact.phone_number, first_name=message.contact.first_name)
-    elif message.location:
-        await client.send_location(TARGET_CHANNEL, latitude=message.location.latitude, longitude=message.location.longitude)
+        content_type = 'sticker'
+        file_id = message.sticker.file_id
+    elif message.text:
+        content_type = 'text'
+        caption = text # Caption is the text itself for text messages
+    # Note: 'contact' and 'location' are not handled in this version for simplicity.
+
+    if not content_type:
+        return # Skip unsupported message types
+
+    # Calculate scheduled time
+    last_scheduled_time = database.get_last_scheduled_time()
+    if last_scheduled_time:
+        scheduled_for = last_scheduled_time + datetime.timedelta(minutes=30)
     else:
-        await message.forward(TARGET_CHANNEL)
+        scheduled_for = datetime.datetime.now() + datetime.timedelta(minutes=5)
+
+    # Add to queue
+    database.add_to_queue(
+        source_message_id=message.id,
+        source_chat_id=message.chat.id,
+        content_type=content_type,
+        file_id=file_id,
+        caption=caption,
+        scheduled_for=scheduled_for
+    )
+    print(f"✅ Message from {message.chat.title} queued for {scheduled_for.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 async def generate_caption_for_image(message):
