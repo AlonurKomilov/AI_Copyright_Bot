@@ -10,6 +10,7 @@ class AdminStates(StatesGroup):
     add_spam_type = State()
     remove_spam_type = State()
     set_ai_model = State()
+    ai_prompt = State()
 
 # States for the PRO user settings
 class ProStates(StatesGroup):
